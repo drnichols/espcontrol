@@ -141,7 +141,9 @@ struct MediaControlModalUi {
   lv_obj_t *volume_group_lbl = nullptr;
   lv_obj_t *volume_pct_lbl = nullptr;
   lv_obj_t *volume_minus_btn = nullptr;
+  lv_obj_t *volume_mute_btn = nullptr;
   lv_obj_t *volume_plus_btn = nullptr;
+  lv_timer_t *mute_pending_timer = nullptr;
   lv_obj_t *speakers_box = nullptr;
   lv_obj_t *speakers_status_lbl = nullptr;
   bool speaker_status_error = false;
@@ -342,11 +344,14 @@ inline bool media_position_timestamp_ms(esphome::StringRef value, uint32_t &upda
 inline bool media_control_seek_pending_active(MediaControlCtx *ctx);
 inline bool media_control_track_position_reset_active(MediaControlCtx *ctx);
 inline bool media_control_volume_pending_active(MediaControlCtx *ctx);
+inline bool media_control_mute_supported(const MediaControlCtx *ctx);
 inline void media_control_hide_modal();
 inline void media_control_layout_modal(MediaControlCtx *ctx);
 inline void media_control_refresh_modal(MediaControlCtx *ctx);
 inline void media_control_refresh_progress(MediaControlCtx *ctx);
 inline void media_control_refresh_volume(MediaControlCtx *ctx);
+inline void media_control_refresh_mute(MediaControlCtx *ctx);
+inline void media_control_mute_pending_timer_cb(lv_timer_t *timer);
 inline void media_control_refresh_group_volume(MediaControlCtx *ctx);
 inline void media_control_speaker_action_timer_cb(lv_timer_t *timer);
 inline void media_control_refresh_power(MediaControlCtx *ctx);
@@ -1446,6 +1451,8 @@ inline void media_playback_apply_state_to_control(MediaPlaybackState *state,
   const bool previous_power_supported = media_control_power_supported(ctx);
   const bool previous_shuffle_supported = media_control_shuffle_supported(ctx);
   const bool previous_repeat_supported = media_control_repeat_supported(ctx);
+  const bool previous_mute_supported = media_control_mute_supported(ctx);
+  const bool mute_was_pending = ctx->mute_pending;
   const bool state_text_changed = state->has_state
     ? ctx->state_text != state->state_text
     : ctx->state_text != "unknown";
@@ -1499,6 +1506,7 @@ inline void media_playback_apply_state_to_control(MediaPlaybackState *state,
   const bool power_supported = media_control_power_supported(ctx);
   const bool shuffle_supported = media_control_shuffle_supported(ctx);
   const bool repeat_supported = media_control_repeat_supported(ctx);
+  const bool mute_supported = media_control_mute_supported(ctx);
   ctx->shuffle_known = shuffle_supported && state->shuffle_known;
   ctx->shuffle_enabled = state->shuffle_enabled;
   ctx->repeat_mode = repeat_supported
@@ -1576,6 +1584,11 @@ inline void media_playback_apply_state_to_control(MediaPlaybackState *state,
                      : ctx->highlight_playing && ctx->playing));
   media_control_refresh_parent_card(ctx);
   MediaControlModalUi &ui = media_control_modal_ui();
+  if (mute_was_pending && !ctx->mute_pending &&
+      ui.active == ctx && ui.mute_pending_timer) {
+    lv_timer_del(ui.mute_pending_timer);
+    ui.mute_pending_timer = nullptr;
+  }
   if (ui.active == ctx) {
     const bool mode_capabilities_changed =
       previous_shuffle_supported != shuffle_supported ||
@@ -1587,6 +1600,13 @@ inline void media_playback_apply_state_to_control(MediaPlaybackState *state,
     if (mode_capabilities_changed && ui.tab == MediaControlTab::CONTROLS) {
       media_control_clear_tab_content();
     }
+    const bool mute_capability_changed =
+      previous_mute_supported != mute_supported;
+    if (mute_capability_changed && ui.tab == MediaControlTab::VOLUME) {
+      media_control_clear_tab_content();
+    }
+    layout_needed = layout_needed || mute_capability_changed;
+    media_control_refresh_mute(ctx);
 #ifdef ESPCONTROL_LOW_HEAP_MEDIA_CONTROL
     if (media_control_progress_supported(ctx) && !ui.progress_tab) layout_needed = true;
     if (!media_control_progress_supported(ctx) && ui.tab == MediaControlTab::PROGRESS) {
@@ -2073,8 +2093,17 @@ inline void media_playback_apply_mute_to_control(
 
 inline void media_playback_apply_mute_to_controls(MediaPlaybackState *state) {
   if (!state) return;
+  MediaControlModalUi &ui = media_control_modal_ui();
   for (MediaControlCtx *ctx : state->controls) {
+    if (!ctx) continue;
+    const bool mute_was_pending = ctx->mute_pending;
     media_playback_apply_mute_to_control(state, ctx);
+    if (ui.active != ctx) continue;
+    if (mute_was_pending && !ctx->mute_pending && ui.mute_pending_timer) {
+      lv_timer_del(ui.mute_pending_timer);
+      ui.mute_pending_timer = nullptr;
+    }
+    media_control_refresh_mute(ctx);
   }
 }
 
@@ -2786,6 +2815,24 @@ inline bool media_control_volume_pending_active(MediaControlCtx *ctx) {
          (int32_t)(ctx->pending_until_ms - esphome::millis()) > 0;
 }
 
+constexpr uint32_t MEDIA_MUTE_PENDING_TIMEOUT_MS = 1500;
+
+inline bool media_control_mute_supported(const MediaControlCtx *ctx) {
+  return ctx && espcontrol::media::volume_mute_supported(
+    ctx->supported_features_known, ctx->supported_features);
+}
+
+inline bool media_control_mute_pending_active(MediaControlCtx *ctx) {
+  if (!ctx || !ctx->mute_pending) return false;
+  if (ctx->mute_pending_until_ms != 0 &&
+      (int32_t)(ctx->mute_pending_until_ms - esphome::millis()) > 0) {
+    return true;
+  }
+  ctx->mute_pending = false;
+  ctx->mute_pending_until_ms = 0;
+  return false;
+}
+
 inline float media_control_current_position_seconds(MediaControlCtx *ctx) {
   if (!ctx) return 0.0f;
   float seconds = ctx->position_seconds;
@@ -3079,6 +3126,63 @@ inline void media_control_style_playback_mode_button(lv_obj_t *btn,
   media_control_apply_availability(btn, btn, interactive);
 }
 
+inline void media_control_refresh_mute(MediaControlCtx *ctx) {
+  MediaControlModalUi &ui = media_control_modal_ui();
+  if (!ctx || ui.active != ctx) return;
+  const bool supported = media_control_mute_supported(ctx);
+  const bool confirmed_muted = supported && ctx->mute_known && ctx->muted;
+  const bool pending = media_control_mute_pending_active(ctx);
+  if (ui.volume_tab) {
+    lv_obj_t *label = control_modal_icon_label(ui.volume_tab);
+    if (label) {
+      lv_label_set_display_text(
+        label, find_icon(confirmed_muted ? "Volume Off" : "Volume High"));
+    }
+  }
+  if (!ui.volume_mute_btn) return;
+  if (supported) lv_obj_clear_flag(ui.volume_mute_btn, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(ui.volume_mute_btn, LV_OBJ_FLAG_HIDDEN);
+  // Tab cleanup cancels the UI timer, but keeps the original command deadline.
+  if (supported && pending && !ui.mute_pending_timer) {
+    const int32_t remaining_ms =
+      (int32_t)(ctx->mute_pending_until_ms - esphome::millis());
+    ui.mute_pending_timer = lv_timer_create(
+      media_control_mute_pending_timer_cb,
+      remaining_ms > 0 ? (uint32_t)remaining_ms : 1, nullptr);
+  }
+  media_control_style_playback_mode_button(
+    ui.volume_mute_btn, confirmed_muted,
+    supported && ctx->available && ctx->state_known && ctx->mute_known && !pending,
+    ctx->accent_color);
+}
+
+inline void media_control_mute_pending_timer_cb(lv_timer_t *timer) {
+  MediaControlModalUi &ui = media_control_modal_ui();
+  if (ui.mute_pending_timer == timer) ui.mute_pending_timer = nullptr;
+  if (ui.active) {
+    ui.active->mute_pending = false;
+    ui.active->mute_pending_until_ms = 0;
+    media_control_refresh_mute(ui.active);
+  }
+  if (timer) lv_timer_del(timer);
+}
+
+inline void media_control_send_mute_action(MediaControlCtx *ctx) {
+  if (!ctx || !ctx->available || !ctx->state_known || !ctx->mute_known ||
+      !media_control_mute_supported(ctx) ||
+      media_control_mute_pending_active(ctx)) return;
+  ctx->mute_pending = true;
+  ctx->mute_pending_target = !ctx->muted;
+  ctx->mute_pending_until_ms =
+    esphome::millis() + MEDIA_MUTE_PENDING_TIMEOUT_MS;
+  MediaControlModalUi &ui = media_control_modal_ui();
+  if (ui.mute_pending_timer) lv_timer_del(ui.mute_pending_timer);
+  ui.mute_pending_timer = lv_timer_create(
+    media_control_mute_pending_timer_cb, MEDIA_MUTE_PENDING_TIMEOUT_MS, nullptr);
+  send_media_mute_action(ctx->entity_id, ctx->mute_pending_target);
+  media_control_refresh_mute(ctx);
+}
+
 inline void media_control_refresh_playback_modes(MediaControlCtx *ctx) {
   MediaControlModalUi &ui = media_control_modal_ui();
   if (!ctx || ui.active != ctx) return;
@@ -3116,6 +3220,7 @@ inline void media_control_refresh_modal(MediaControlCtx *ctx) {
   media_control_refresh_play_icon(ctx);
   media_control_refresh_progress(ctx);
   media_control_refresh_volume(ctx);
+  media_control_refresh_mute(ctx);
   media_control_refresh_speakers(ctx);
   media_control_refresh_power(ctx);
   media_control_refresh_playback_modes(ctx);
@@ -3565,6 +3670,18 @@ inline void media_control_create_volume_tab_content(MediaControlCtx *ctx) {
   ui.volume_plus_btn = control_modal_create_round_button(
     ui.content_box, 56, find_icon("Plus"), ctx->icon_font,
     theme_display_color(current_theme().border), theme_display_color(current_theme().surface_primary), ctx->width_compensation_percent);
+  if (media_control_mute_supported(ctx)) {
+    ui.volume_mute_btn = control_modal_create_round_button(
+      ui.content_box, 56, find_icon("Volume Off"), ctx->icon_font,
+      theme_display_color(current_theme().border),
+      theme_display_color(current_theme().surface_primary),
+      ctx->width_compensation_percent);
+    if (ui.volume_mute_btn) {
+      lv_obj_add_event_cb(ui.volume_mute_btn, [](lv_event_t *) {
+        media_control_send_mute_action(media_control_modal_ui().active);
+      }, LV_EVENT_CLICKED, nullptr);
+    }
+  }
   control_modal_apply_pressed_fill_color(ui.volume_minus_btn, ctx->accent_color);
   control_modal_apply_pressed_fill_color(ui.volume_plus_btn, ctx->accent_color);
   if (ui.volume_minus_btn) {
@@ -3586,6 +3703,7 @@ inline void media_control_create_volume_tab_content(MediaControlCtx *ctx) {
     }, LV_EVENT_CLICKED, nullptr);
   }
   media_control_refresh_volume_controls(ctx);
+  media_control_refresh_mute(ctx);
 }
 
 inline MediaSpeakerRowState *media_control_find_speaker_row(const std::string &entity_id) {
@@ -4396,6 +4514,10 @@ inline void media_control_create_power_tab_content(MediaControlCtx *ctx) {
 
 inline void media_control_clear_tab_content() {
   MediaControlModalUi &ui = media_control_modal_ui();
+  if (ui.mute_pending_timer) {
+    lv_timer_del(ui.mute_pending_timer);
+    ui.mute_pending_timer = nullptr;
+  }
   if (ui.speaker_action_timer) {
     lv_timer_del(ui.speaker_action_timer);
     ui.speaker_action_timer = nullptr;
@@ -4430,6 +4552,7 @@ inline void media_control_clear_tab_content() {
   ui.volume_group_lbl = nullptr;
   ui.volume_pct_lbl = nullptr;
   ui.volume_minus_btn = nullptr;
+  ui.volume_mute_btn = nullptr;
   ui.volume_plus_btn = nullptr;
   ui.speakers_box = nullptr;
   ui.speakers_status_lbl = nullptr;
@@ -4729,9 +4852,41 @@ inline void media_control_layout_modal(MediaControlCtx *ctx) {
     volume_buttons_layout.controls_center_y -= volume_buttons_up;
     const bool compact_landscape =
       display_modal_uses_compact_landscape_controls(layout.profile);
-    control_modal_apply_step_buttons_layout(
-      ui.volume_minus_btn, ui.volume_plus_btn, volume_buttons_layout,
-      compact_landscape, control_modal_scaled_px(4, layout.short_side), 256);
+    lv_obj_t *volume_buttons[3] = {
+      ui.volume_minus_btn, ui.volume_mute_btn, ui.volume_plus_btn
+    };
+    const int visible_volume_buttons = ui.volume_mute_btn ? 3 : 2;
+    lv_coord_t button_size = volume_buttons_layout.btn_size;
+    if (compact_landscape) {
+      lv_coord_t compact_size = control_modal_scaled_px(
+        56, volume_buttons_layout.short_side);
+      if (compact_size < volume_buttons_layout.profile.base_touch_target) {
+        compact_size = volume_buttons_layout.profile.base_touch_target;
+      }
+      if (button_size > compact_size) button_size = compact_size;
+    }
+    const lv_coord_t gap = volume_buttons_layout.controls_gap;
+    const auto alignment = compact_landscape ? LV_ALIGN_BOTTOM_MID : LV_ALIGN_CENTER;
+    const lv_coord_t offset_y = compact_landscape
+      ? -control_modal_scaled_px(4, layout.short_side)
+      : volume_buttons_layout.controls_center_y;
+    int button_index = 0;
+    for (lv_obj_t *button : volume_buttons) {
+      if (!button) continue;
+      // Place centers symmetrically, preserving the existing two-button offsets.
+      const lv_coord_t button_x =
+        (2 * button_index - (visible_volume_buttons - 1)) * (button_size + gap) / 2;
+      lv_obj_set_size(button, button_size, button_size);
+      lv_obj_set_style_radius(button, button_size / 2, LV_PART_MAIN);
+      lv_obj_align(button, alignment, button_x, offset_y);
+      lv_obj_t *label = lv_obj_get_child(button, 0);
+      if (label) {
+        lv_obj_set_style_transform_zoom(
+          label, compact_landscape ? 200 : 256, LV_PART_MAIN);
+        control_modal_center_tab_icon(label);
+      }
+      ++button_index;
+    }
     if (ui.volume_pct_lbl) {
       const lv_font_t *number_font = display_modal_volume_number_font(ctx->number_font);
       if (number_font) {
