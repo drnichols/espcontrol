@@ -266,7 +266,7 @@ assert(std::count_if(
   }) == 1);
 assert(reannounce_count == 1);
 
-subscriptions.back().callback(esphome::StringRef("true"));
+subscriptions.back().callback(esphome::StringRef("on"));
 assert(state.mute_known && state.muted);
 assert(first.mute_known && first.muted);
 assert(second.mute_known && second.muted);
@@ -279,11 +279,11 @@ assert(!second.mute_known && second.muted);
 first.mute_pending = true;
 first.mute_pending_target = false;
 first.mute_pending_until_ms = 2000;
-subscriptions.back().callback(esphome::StringRef("true"));
+subscriptions.back().callback(esphome::StringRef("on"));
 assert(first.mute_pending && first.mute_pending_until_ms == 2000);
 subscriptions.back().callback(esphome::StringRef("unknown"));
 assert(first.mute_pending && first.mute_pending_until_ms == 2000);
-subscriptions.back().callback(esphome::StringRef("false"));
+subscriptions.back().callback(esphome::StringRef("off"));
 assert(first.mute_known && !first.muted);
 assert(!first.mute_pending && first.mute_pending_until_ms == 0);
 assert(second.mute_known && !second.muted);
@@ -329,12 +329,12 @@ assert(timer_create_count == timers_while_pending);
 // A real subscription callback updates confirmed UI state without rebuilding.
 lv_obj_t *mute_button = ui.volume_mute_btn;
 lv_timer_t *pending_timer = ui.mute_pending_timer;
-subscriptions.back().callback(esphome::StringRef("false"));
+subscriptions.back().callback(esphome::StringRef("off"));
 assert(ctx.mute_pending && ui.mute_pending_timer == pending_timer);
 assert(button_label(ui.volume_tab) == find_icon("Volume High"));
 assert(!button_accented(ui.volume_mute_btn));
 assert(!button_enabled(ui.volume_mute_btn));
-subscriptions.back().callback(esphome::StringRef("true"));
+subscriptions.back().callback(esphome::StringRef("on"));
 assert(ctx.mute_known && ctx.muted);
 assert(!ctx.mute_pending && ctx.mute_pending_until_ms == 0);
 assert(ui.mute_pending_timer == nullptr && pending_timer->deleted);
@@ -394,7 +394,7 @@ media_control_send_mute_action(&ctx);
 assert(sent_value == "false" && !ctx.mute_pending_target);
 assert(ctx.muted && button_accented(ui.volume_mute_btn));
 pending_timer = ui.mute_pending_timer;
-subscriptions.back().callback(esphome::StringRef("true"));
+subscriptions.back().callback(esphome::StringRef("on"));
 assert(ctx.mute_pending && ui.mute_pending_timer == pending_timer);
 assert(button_label(ui.volume_tab) == find_icon("Volume Off"));
 assert(button_accented(ui.volume_mute_btn));
@@ -403,7 +403,7 @@ assert(ctx.mute_pending && !ctx.mute_known);
 assert(button_label(ui.volume_tab) == find_icon("Volume High"));
 assert(!button_accented(ui.volume_mute_btn));
 assert(!button_enabled(ui.volume_mute_btn));
-subscriptions.back().callback(esphome::StringRef("false"));
+subscriptions.back().callback(esphome::StringRef("off"));
 assert(!ctx.mute_pending && ui.mute_pending_timer == nullptr);
 assert(pending_timer->deleted && !ctx.muted);
 assert(button_enabled(ui.volume_mute_btn));
@@ -450,9 +450,9 @@ assert(button_enabled(ui.volume_mute_btn));
 
 // Ordinary callbacks refresh the tab icon even with no Volume content mounted.
 media_control_clear_tab_content();
-subscriptions.back().callback(esphome::StringRef("true"));
+subscriptions.back().callback(esphome::StringRef("on"));
 assert(button_label(ui.volume_tab) == find_icon("Volume Off"));
-subscriptions.back().callback(esphome::StringRef("false"));
+subscriptions.back().callback(esphome::StringRef("off"));
 assert(button_label(ui.volume_tab) == find_icon("Volume High"));
 
 // Compare unsupported geometry to the existing two-button contract, including

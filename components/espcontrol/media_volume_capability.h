@@ -31,11 +31,12 @@ inline bool parse_volume_mute_state(const std::string &value, bool &muted) {
   for (char &ch : normalized) {
     ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
   }
-  if (normalized == "true") {
+  // Home Assistant's ESPHome bridge forwards boolean attributes as on/off.
+  if (normalized == "true" || normalized == "on") {
     muted = true;
     return true;
   }
-  if (normalized == "false") {
+  if (normalized == "false" || normalized == "off") {
     muted = false;
     return true;
   }

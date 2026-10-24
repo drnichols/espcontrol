@@ -27,9 +27,12 @@ int main() {
   bool muted = false;
   assert(parse_volume_mute_state("true", muted) && muted);
   assert(parse_volume_mute_state(" FALSE ", muted) && !muted);
+  // Home Assistant's ESPHome bridge sends boolean attributes as on/off.
+  assert(parse_volume_mute_state("on", muted) && muted);
+  assert(parse_volume_mute_state(" OFF ", muted) && !muted);
   muted = true;
   for (const std::string value : {
-         "", "none", "null", "unknown", "unavailable", "on", "0"}) {
+         "", "none", "null", "unknown", "unavailable", "0"}) {
     assert(!parse_volume_mute_state(value, muted));
     assert(muted);  // Invalid input must not overwrite the last confirmed value.
   }
