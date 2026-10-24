@@ -72,6 +72,11 @@ struct MediaControlCtx {
   bool dragging_volume = false;
   bool supported_features_known = false;
   int supported_features = 0;
+  bool mute_known = false;
+  bool muted = false;
+  bool mute_pending = false;
+  bool mute_pending_target = false;
+  uint32_t mute_pending_until_ms = 0;
   bool shuffle_known = false;
   bool shuffle_enabled = false;
   espcontrol::media::RepeatMode repeat_mode =
@@ -424,6 +429,12 @@ inline void media_playback_subscribe_progress(
   MediaPlaybackState *state,
   uint32_t scope = HA_SUBSCRIPTION_SCOPE_DEFAULT);
 inline void media_playback_subscribe_volume(MediaPlaybackState *state);
+inline void media_playback_apply_mute_to_control(
+  MediaPlaybackState *state, MediaControlCtx *ctx);
+inline void media_playback_apply_mute_to_controls(MediaPlaybackState *state);
+inline void media_playback_update_mute_state(
+  MediaPlaybackState *state, const std::string &value);
+inline bool media_playback_subscribe_mute(MediaPlaybackState *state);
 inline void media_playback_subscribe_modes(MediaPlaybackState *state);
 inline void media_playback_subscribe_friendly_name(MediaPlaybackState *state);
 inline void media_playback_subscribe_grouping(MediaPlaybackState *state);
@@ -704,6 +715,7 @@ struct MediaPlaybackState {
   bool progress_subscribed = false;
   uint32_t progress_subscription_scope = 0;
   bool volume_subscribed = false;
+  bool mute_subscribed = false;
   bool capabilities_subscribed = false;
   bool shuffle_subscribed = false;
   bool repeat_subscribed = false;
@@ -740,6 +752,8 @@ struct MediaPlaybackState {
   bool position_updated_at_known = false;
   uint32_t position_updated_at_ms = 0;
   bool volume_known = false;
+  bool mute_known = false;
+  bool muted = false;
   int volume_pct = 0;
   bool supported_features_known = false;
   int supported_features = 0;
@@ -871,6 +885,7 @@ inline void media_playback_reset_state(MediaPlaybackState *state,
   state->progress_subscribed = false;
   state->progress_subscription_scope = 0;
   state->volume_subscribed = false;
+  state->mute_subscribed = false;
   state->capabilities_subscribed = false;
   state->shuffle_subscribed = false;
   state->repeat_subscribed = false;
@@ -906,6 +921,8 @@ inline void media_playback_reset_state(MediaPlaybackState *state,
   state->position_updated_at_known = false;
   state->position_updated_at_ms = 0;
   state->volume_known = false;
+  state->mute_known = false;
+  state->muted = false;
   state->volume_pct = 0;
   state->supported_features_known = false;
   state->supported_features = 0;
@@ -1478,6 +1495,7 @@ inline void media_playback_apply_state_to_control(MediaPlaybackState *state,
   ctx->volume_known = state->volume_known;
   ctx->supported_features_known = state->supported_features_known;
   ctx->supported_features = state->supported_features;
+  media_playback_apply_mute_to_control(state, ctx);
   const bool power_supported = media_control_power_supported(ctx);
   const bool shuffle_supported = media_control_shuffle_supported(ctx);
   const bool repeat_supported = media_control_repeat_supported(ctx);
@@ -2039,12 +2057,66 @@ inline void media_playback_subscribe_volume(MediaPlaybackState *state) {
   );
 }
 
+inline void media_playback_apply_mute_to_control(
+    MediaPlaybackState *state, MediaControlCtx *ctx) {
+  if (!state || !ctx) return;
+  const bool supported = espcontrol::media::volume_mute_supported(
+    state->supported_features_known, state->supported_features);
+  ctx->mute_known = supported && state->mute_known;
+  ctx->muted = state->muted;
+  if (ctx->mute_pending && ctx->mute_known &&
+      ctx->muted == ctx->mute_pending_target) {
+    ctx->mute_pending = false;
+    ctx->mute_pending_until_ms = 0;
+  }
+}
+
+inline void media_playback_apply_mute_to_controls(MediaPlaybackState *state) {
+  if (!state) return;
+  for (MediaControlCtx *ctx : state->controls) {
+    media_playback_apply_mute_to_control(state, ctx);
+  }
+}
+
+inline void media_playback_update_mute_state(MediaPlaybackState *state,
+                                              const std::string &value) {
+  if (!state) return;
+  bool muted = state->muted;
+  state->mute_known =
+    espcontrol::media::parse_volume_mute_state(value, muted);
+  if (state->mute_known) state->muted = muted;
+  media_playback_apply_mute_to_controls(state);
+}
+
+inline bool media_playback_subscribe_mute(MediaPlaybackState *state) {
+  if (!state || state->controls.empty() || state->entity_id.empty() ||
+      state->mute_subscribed ||
+      !espcontrol::media::volume_mute_supported(
+        state->supported_features_known, state->supported_features)) {
+    return false;
+  }
+  state->mute_subscribed = true;
+  const std::string entity_id = state->entity_id;
+  const uint32_t generation = state->generation;
+  ha_subscribe_attribute(
+    entity_id, std::string("is_volume_muted"),
+    std::function<void(esphome::StringRef)>(
+      [state, generation](esphome::StringRef value) {
+        if (!media_playback_generation_valid(state, generation)) return;
+        media_playback_update_mute_state(
+          state, string_ref_limited(value, HA_SHORT_STATE_MAX_LEN));
+      })
+  );
+  return true;
+}
+
 inline void media_playback_subscribe_modes(MediaPlaybackState *state) {
   if (!state || state->controls.empty() || state->entity_id.empty() ||
       !state->supported_features_known) return;
   const std::string entity_id = state->entity_id;
   const uint32_t generation = state->generation;
   bool subscription_added = false;
+  if (media_playback_subscribe_mute(state)) subscription_added = true;
 
   if (espcontrol::media::shuffle_supported(
         state->supported_features_known, state->supported_features) &&
