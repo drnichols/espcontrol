@@ -1,10 +1,12 @@
 #include <cassert>
+#include <string>
 
 #include "media_volume_capability.h"
 
 int main() {
   using espcontrol::media::SUPPORT_VOLUME_SET;
   using espcontrol::media::SUPPORT_VOLUME_STEP;
+  using espcontrol::media::SUPPORT_VOLUME_MUTE;
   using espcontrol::media::VolumeCommandKind;
   using espcontrol::media::VolumeControlMode;
   using espcontrol::media::volume_arc_interactive;
@@ -13,6 +15,24 @@ int main() {
   using espcontrol::media::volume_decrease_enabled;
   using espcontrol::media::volume_display_value;
   using espcontrol::media::volume_increase_enabled;
+  using espcontrol::media::parse_volume_mute_state;
+  using espcontrol::media::volume_mute_supported;
+
+  assert(!volume_mute_supported(false, SUPPORT_VOLUME_MUTE));
+  assert(!volume_mute_supported(true, 0));
+  assert(volume_mute_supported(true, SUPPORT_VOLUME_MUTE));
+  assert(volume_mute_supported(
+    true, SUPPORT_VOLUME_SET | SUPPORT_VOLUME_MUTE));
+
+  bool muted = false;
+  assert(parse_volume_mute_state("true", muted) && muted);
+  assert(parse_volume_mute_state(" FALSE ", muted) && !muted);
+  muted = true;
+  for (const std::string value : {
+         "", "none", "null", "unknown", "unavailable", "on", "0"}) {
+    assert(!parse_volume_mute_state(value, muted));
+    assert(muted);  // Invalid input must not overwrite the last confirmed value.
+  }
 
   // Preserve the existing absolute-volume behaviour until Home Assistant
   // publishes the entity's supported feature flags.
