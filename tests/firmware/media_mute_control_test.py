@@ -495,6 +495,31 @@ for (bool compact : {false, true}) {
   }
 }
 
+// A real action can wrap its deadline exactly to zero; the pending flag owns validity.
+esphome::now = UINT32_MAX - 1499;
+const int sends_before_zero_deadline = action_send_count;
+media_control_send_mute_action(&ctx);
+assert(action_send_count == sends_before_zero_deadline + 1);
+assert(ctx.mute_pending && ctx.mute_pending_until_ms == 0);
+assert(media_control_mute_pending_active(&ctx));
+pending_timer = ui.mute_pending_timer;
+assert(pending_timer && pending_timer->period == 1500);
+const int timers_at_zero_deadline = timer_create_count;
+esphome::now += 1499;
+assert(esphome::now == UINT32_MAX);
+assert(media_control_mute_pending_active(&ctx));
+media_control_send_mute_action(&ctx);
+assert(action_send_count == sends_before_zero_deadline + 1);
+assert(timer_create_count == timers_at_zero_deadline);
+assert(!button_enabled(ui.volume_mute_btn));
+esphome::now += 1;
+assert(esphome::now == 0);
+pending_timer->callback(pending_timer);
+assert(!ctx.mute_pending && ctx.mute_pending_until_ms == 0);
+assert(!media_control_mute_pending_active(&ctx));
+assert(ui.mute_pending_timer == nullptr && pending_timer->deleted);
+assert(button_enabled(ui.volume_mute_btn));
+
 assert(!media_control_mute_pending_active(nullptr));
 ctx.mute_pending = true;
 ctx.mute_pending_until_ms = 0;

@@ -8,6 +8,7 @@ dependencies = []
 dev = [
     "cmake==3.31.10",
     "esphome==2026.9.1",
+    "ruff==0.16.0",
     "tzdata==2026.3",
 ]
 

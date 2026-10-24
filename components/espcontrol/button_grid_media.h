@@ -2824,8 +2824,7 @@ inline bool media_control_mute_supported(const MediaControlCtx *ctx) {
 
 inline bool media_control_mute_pending_active(MediaControlCtx *ctx) {
   if (!ctx || !ctx->mute_pending) return false;
-  if (ctx->mute_pending_until_ms != 0 &&
-      (int32_t)(ctx->mute_pending_until_ms - esphome::millis()) > 0) {
+  if ((int32_t)(ctx->mute_pending_until_ms - esphome::millis()) > 0) {
     return true;
   }
   ctx->mute_pending = false;
