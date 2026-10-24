@@ -1,0 +1,16 @@
+[project]
+name = "espcontrol-dev"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "cmake==3.31.10",
+    "esphome==2026.9.1",
+    "ruff==0.16.0",
+    "tzdata==2026.3",
+]
+
+[tool.uv]
+package = false
