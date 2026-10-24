@@ -1,7 +1,7 @@
 # Media Player Mute Status and Control Design
 
 **Date:** 2026-10-24
-**Status:** Approved design, awaiting written-spec review
+**Status:** Approved
 
 ## Goal
 
