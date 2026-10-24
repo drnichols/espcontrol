@@ -24,17 +24,19 @@ agree what should change before you spend time building it.
 
 ## Preparing a Branch
 
-Use Node.js 24, Python 3.12 or newer, CMake 3.20 or newer, and a C++ compiler.
-Set up the Python dependencies in a virtual environment to match CI:
+Use Node.js 24, pyenv, uv, and a C++ compiler. The repository pins Python,
+ESPHome, CMake, and timezone data so local checks use the same tool versions:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-. .github/esphome.env
-python -m pip install "esphome==${ESPHOME_VERSION}" "tzdata==2026.3"
-export PYTHONTZPATH="$(python -c 'import pathlib, tzdata; print(pathlib.Path(tzdata.__file__).parent / "zoneinfo")')"
-npm run prepare:ci
+pyenv install -s "$(cat .python-version)"
+uv sync --locked
+export PYTHONTZPATH="$(uv run python -c 'import pathlib, tzdata; print(pathlib.Path(tzdata.__file__).parent / "zoneinfo")')"
+uv run npm run prepare:ci
 ```
+
+uv creates `.venv` inside the current checkout or worktree. Run `uv sync
+--locked` once in each new worktree; do not reuse or activate an environment
+from another checkout.
 
 The preparation command performs a clean install from the lockfile, checks that
 the authored product definitions agree, and regenerates the device manifest,
@@ -49,10 +51,10 @@ product definitions. Fix those deliberately when a check reports them. For a
 dependency update, regenerate and commit `package-lock.json` using Node.js 24;
 preparation rejects a lockfile that no longer matches `package.json`.
 
-For checks without regeneration, use `npm run check:ci`. It reports all
+For checks without regeneration, use `uv run npm run check:ci`. It reports all
 independent failures in one run and skips checks whose prerequisites failed.
-The fast and release profiles still stop at the first failure; use
-`npm run check:fast -- --keep-going` when investigating several failures locally.
+The fast and release profiles still stop at the first failure. When investigating
+several failures locally, use `uv run npm run check:fast -- --keep-going`.
 
 The web bundle has explicit limits of 2,750,000 minified bytes and 1,150,000 gzip
 bytes, initially about 5% above its measured size. Ordinary growth and shrinkage

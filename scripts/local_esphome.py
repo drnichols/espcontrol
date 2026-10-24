@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -37,6 +38,31 @@ def pinned_esphome_version() -> str:
     if len(versions) != 1 or not versions[0]:
         raise LocalEsphomeError(f"{env_path} must declare exactly one ESPHOME_VERSION")
     return versions[0]
+
+
+def ensure_project_esphome_pin() -> None:
+    pyproject_path = ROOT / "pyproject.toml"
+    try:
+        project = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise LocalEsphomeError(f"Could not read {pyproject_path}: {exc}") from exc
+
+    dev_dependencies = project.get("dependency-groups", {}).get("dev", [])
+    pins = [
+        dependency.removeprefix("esphome==")
+        for dependency in dev_dependencies
+        if isinstance(dependency, str) and dependency.startswith("esphome==")
+    ]
+    if len(pins) != 1:
+        raise LocalEsphomeError(
+            f"{pyproject_path} must declare exactly one esphome== version in dependency-groups.dev"
+        )
+
+    expected = pinned_esphome_version()
+    if pins[0] != expected:
+        raise LocalEsphomeError(
+            f"{pyproject_path} pins ESPHome {pins[0]}, but .github/esphome.env requires {expected}"
+        )
 
 
 def installed_esphome_version(esphome_bin: str) -> str:
@@ -154,6 +180,9 @@ def run(argv: list[str]) -> int:
 
 
 class LocalEsphomeTests(unittest.TestCase):
+    def test_repository_project_and_firmware_esphome_pins_match(self) -> None:
+        ensure_project_esphome_pin()
+
     def test_reads_the_repository_pinned_esphome_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -163,6 +192,37 @@ class LocalEsphomeTests(unittest.TestCase):
 
             with mock.patch(__name__ + ".ROOT", root):
                 self.assertEqual(pinned_esphome_version(), "test-version")
+
+    def test_accepts_matching_project_and_firmware_esphome_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            env_path = root / ".github" / "esphome.env"
+            env_path.parent.mkdir()
+            env_path.write_text("ESPHOME_VERSION=2026.9.1\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                '[dependency-groups]\ndev = ["esphome==2026.9.1"]\n',
+                encoding="utf-8",
+            )
+
+            with mock.patch(__name__ + ".ROOT", root):
+                ensure_project_esphome_pin()
+
+    def test_rejects_project_esphome_pin_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            env_path = root / ".github" / "esphome.env"
+            env_path.parent.mkdir()
+            env_path.write_text("ESPHOME_VERSION=2026.9.1\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                '[dependency-groups]\ndev = ["esphome==2026.8.0"]\n',
+                encoding="utf-8",
+            )
+
+            with mock.patch(__name__ + ".ROOT", root):
+                with self.assertRaisesRegex(
+                    LocalEsphomeError, "pyproject.toml.*2026.8.0.*2026.9.1"
+                ):
+                    ensure_project_esphome_pin()
 
     def test_reads_installed_esphome_version(self) -> None:
         with mock.patch(__name__ + ".subprocess.run") as run_mock:
