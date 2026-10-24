@@ -37,6 +37,14 @@ int main() {
     assert(muted);  // Invalid input must not overwrite the last confirmed value.
   }
 
+  using espcontrol::media::volume_mute_card_icon_name;
+  assert(std::string(volume_mute_card_icon_name("Speaker")) == "Speaker Off");
+  assert(std::string(volume_mute_card_icon_name("Speaker Multiple")) ==
+         "Speaker Off");
+  assert(std::string(volume_mute_card_icon_name("Volume High")) == "Volume Off");
+  assert(std::string(volume_mute_card_icon_name("Music")) == "Volume Off");
+  assert(std::string(volume_mute_card_icon_name("")) == "Volume Off");
+
   // Preserve the existing absolute-volume behaviour until Home Assistant
   // publishes the entity's supported feature flags.
   assert(volume_control_mode(false, 0) == VolumeControlMode::ABSOLUTE);

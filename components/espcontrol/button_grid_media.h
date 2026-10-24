@@ -51,6 +51,8 @@ struct MediaControlCtx {
   uint32_t tertiary_color = theme_display_color(current_theme().surface_secondary);
   lv_obj_t *btn = nullptr;
   lv_obj_t *icon_lbl = nullptr;
+  const char *icon_glyph = nullptr;
+  const char *muted_icon_glyph = nullptr;
   lv_obj_t *label_lbl = nullptr;
   lv_obj_t *volume_value_lbl = nullptr;
   lv_obj_t *volume_unit_lbl = nullptr;
@@ -480,8 +482,20 @@ inline void media_control_apply_availability(lv_obj_t *visual_obj, lv_obj_t *inp
   else lv_obj_clear_flag(input_obj, LV_OBJ_FLAG_CLICKABLE);
 }
 
+// Card icons follow confirmed mute state only; the volume number and cover
+// art variants own their top-left content.
+inline void media_control_refresh_card_mute_icon(MediaControlCtx *ctx) {
+  if (!ctx || !ctx->icon_lbl || !ctx->icon_glyph || !ctx->muted_icon_glyph ||
+      ctx->top_shows_volume || ctx->cover_art_mode) return;
+  const bool show_muted =
+    media_control_mute_supported(ctx) && ctx->mute_known && ctx->muted;
+  lv_label_set_display_text(
+    ctx->icon_lbl, show_muted ? ctx->muted_icon_glyph : ctx->icon_glyph);
+}
+
 inline void media_control_refresh_parent_card(MediaControlCtx *ctx) {
   if (!ctx) return;
+  media_control_refresh_card_mute_icon(ctx);
   if (ctx->label_lbl &&
       espcontrol::media::media_control_updates_parent_label(
         ctx->cover_art_mode)) {
@@ -2098,6 +2112,7 @@ inline void media_playback_apply_mute_to_controls(MediaPlaybackState *state) {
     if (!ctx) continue;
     const bool mute_was_pending = ctx->mute_pending;
     media_playback_apply_mute_to_control(state, ctx);
+    media_control_refresh_card_mute_icon(ctx);
     if (ui.active != ctx) continue;
     if (mute_was_pending && !ctx->mute_pending && ui.mute_pending_timer) {
       lv_timer_del(ui.mute_pending_timer);
@@ -4972,6 +4987,11 @@ inline MediaControlCtx *create_media_control_context(
   ctx->tertiary_color = tertiary_color;
   ctx->btn = s.btn;
   ctx->icon_lbl = s.icon_lbl;
+  const std::string mode = media_card_mode(p.sensor);
+  ctx->icon_glyph = media_default_icon(mode, p.icon);
+  const bool auto_icon = p.icon.empty() || p.icon == "Auto";
+  ctx->muted_icon_glyph = find_icon(espcontrol::media::volume_mute_card_icon_name(
+    auto_icon ? std::string() : p.icon));
   ctx->label_lbl = s.text_lbl;
   ctx->volume_value_lbl = s.sensor_lbl;
   ctx->volume_unit_lbl = s.unit_lbl;

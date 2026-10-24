@@ -16,6 +16,12 @@ inline bool volume_mute_supported(bool supported_features_known,
          (supported_features & SUPPORT_VOLUME_MUTE) != 0;
 }
 
+// Speaker-style card icons keep their family when muted; anything else,
+// including the mode's automatic icon, uses the generic muted volume icon.
+inline const char *volume_mute_card_icon_name(const std::string &icon_name) {
+  return icon_name.rfind("Speaker", 0) == 0 ? "Speaker Off" : "Volume Off";
+}
+
 inline bool parse_volume_mute_state(const std::string &value, bool &muted) {
   size_t start = 0;
   while (start < value.size() &&

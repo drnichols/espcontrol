@@ -41,6 +41,7 @@ std::string string_ref_limited(esphome::StringRef value, size_t) {
 }
 constexpr size_t HA_SHORT_STATE_MAX_LEN = 64;
 
+struct lv_obj_t;
 struct MediaControlCtx {
   std::string entity_id;
   std::string power_entity = "media_player.separate_power";
@@ -54,6 +55,11 @@ struct MediaControlCtx {
   bool mute_pending_target = false;
   uint32_t mute_pending_until_ms = 0;
   uint32_t accent_color = 0x336699;
+  lv_obj_t *icon_lbl = nullptr;
+  const char *icon_glyph = nullptr;
+  const char *muted_icon_glyph = nullptr;
+  bool top_shows_volume = false;
+  bool cover_art_mode = false;
 };
 
 struct MediaPlaybackState {
@@ -215,6 +221,7 @@ for name in (
     'media_control_refresh_mute',
     'media_control_mute_pending_timer_cb',
     'media_control_send_mute_action',
+    'media_control_refresh_card_mute_icon',
     'media_playback_apply_mute_to_control',
     'media_playback_apply_mute_to_controls',
     'media_playback_update_mute_state',
@@ -531,6 +538,39 @@ assert(media_control_mute_pending_active(&ctx));
 esphome::now += 1500;
 assert(!media_control_mute_pending_active(&ctx));
 assert(ctx.mute_pending_until_ms == 0);
+
+// The main-screen card swaps to its muted icon only for a confirmed mute.
+state.controls = {&first};
+lv_obj_t *card_icon = make_test_button()->label;
+card_icon->text = find_icon("Speaker");
+first.icon_lbl = card_icon;
+first.icon_glyph = find_icon("Speaker");
+first.muted_icon_glyph = find_icon("Speaker Off");
+first.supported_features_known = true;
+first.supported_features = espcontrol::media::SUPPORT_VOLUME_MUTE;
+subscriptions.back().callback(esphome::StringRef("on"));
+assert(card_icon->text == find_icon("Speaker Off"));
+subscriptions.back().callback(esphome::StringRef("unknown"));
+assert(card_icon->text == find_icon("Speaker"));
+subscriptions.back().callback(esphome::StringRef("on"));
+subscriptions.back().callback(esphome::StringRef("off"));
+assert(card_icon->text == find_icon("Speaker"));
+first.top_shows_volume = true;
+subscriptions.back().callback(esphome::StringRef("on"));
+assert(card_icon->text == find_icon("Speaker"));
+first.top_shows_volume = false;
+first.cover_art_mode = true;
+subscriptions.back().callback(esphome::StringRef("off"));
+subscriptions.back().callback(esphome::StringRef("on"));
+assert(card_icon->text == find_icon("Speaker"));
+first.cover_art_mode = false;
+first.supported_features = 0;
+subscriptions.back().callback(esphome::StringRef("off"));
+subscriptions.back().callback(esphome::StringRef("on"));
+assert(card_icon->text == find_icon("Speaker"));
+first.icon_lbl = nullptr;
+subscriptions.back().callback(esphome::StringRef("off"));
+
 assert(timer_create_count == timer_delete_count);
 return 0;
 }
@@ -550,6 +590,10 @@ _, creator = definition(media, 'media_control_create_volume_tab_content')
 assert 'if (media_control_mute_supported(ctx))' in creator
 assert 'media_control_send_mute_action(media_control_modal_ui().active);' in creator
 assert 'media_control_refresh_mute(ctx);' in creator
+_, parent = definition(media, 'media_control_refresh_parent_card')
+assert 'media_control_refresh_card_mute_icon(ctx);' in parent
+_, card_ctx = definition(media, 'create_media_control_context')
+assert 'ctx->icon_glyph = ' in card_ctx and 'ctx->muted_icon_glyph = ' in card_ctx
 _, refresh = definition(media, 'media_control_refresh_modal')
 assert 'media_control_refresh_mute(ctx);' in refresh
 _, apply_state = definition(media, 'media_playback_apply_state_to_control')
