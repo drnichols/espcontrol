@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Exercise production mute subscription, propagation, action, and UI policy."""
-from pathlib import Path
 import os
 import re
 import subprocess
 import tempfile
+from pathlib import Path
 
 from generate_media_lifecycle_integration import definition
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 PROFILES = ("product", "fast", "ci", "all", "release")
 DOMAINS = ("product", "firmware", "web", "docs", "workflow")
 

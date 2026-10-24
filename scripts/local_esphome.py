@@ -15,7 +15,6 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -176,7 +175,7 @@ def run(argv: list[str]) -> int:
 
     ensure_pinned_esphome(esphome_bin)
     esphome_command = build_esphome_command(yaml_path, command, command_args, version, esphome_bin)
-    return subprocess.run(esphome_command, cwd=esphome_working_dir(yaml_path)).returncode
+    return subprocess.run(esphome_command, cwd=esphome_working_dir(yaml_path), check=False).returncode
 
 
 class LocalEsphomeTests(unittest.TestCase):
@@ -218,11 +217,13 @@ class LocalEsphomeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with mock.patch(__name__ + ".ROOT", root):
-                with self.assertRaisesRegex(
+            with (
+                mock.patch(__name__ + ".ROOT", root),
+                self.assertRaisesRegex(
                     LocalEsphomeError, "pyproject.toml.*2026.8.0.*2026.9.1"
-                ):
-                    ensure_project_esphome_pin()
+                ),
+            ):
+                ensure_project_esphome_pin()
 
     def test_reads_installed_esphome_version(self) -> None:
         with mock.patch(__name__ + ".subprocess.run") as run_mock:
@@ -235,10 +236,12 @@ class LocalEsphomeTests(unittest.TestCase):
             self.assertEqual(installed_esphome_version("esphome"), "2026.8.1")
 
     def test_rejects_an_unpinned_esphome_version(self) -> None:
-        with mock.patch(__name__ + ".pinned_esphome_version", return_value="2026.8.1"), \
-            mock.patch(__name__ + ".installed_esphome_version", return_value="2026.8.0"):
-            with self.assertRaisesRegex(LocalEsphomeError, "2026.8.1.*2026.8.0"):
-                ensure_pinned_esphome("esphome")
+        with (
+            mock.patch(__name__ + ".pinned_esphome_version", return_value="2026.8.1"),
+            mock.patch(__name__ + ".installed_esphome_version", return_value="2026.8.0"),
+            self.assertRaisesRegex(LocalEsphomeError, "2026.8.1.*2026.8.0"),
+        ):
+            ensure_pinned_esphome("esphome")
 
     def test_uses_dev_firmware_version(self) -> None:
         path = ROOT / "devices" / "esp32-p4-86" / "dev.yaml"
